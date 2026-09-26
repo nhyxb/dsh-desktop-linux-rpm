@@ -26,42 +26,31 @@ BuildArch:      x86_64
 # 造成安装时不可解析的依赖。改为下面手写的 soname 级依赖。
 AutoReqProv:    no
 
-# 运行依赖 —— 与 aur/dsh-desktop-bin/PKGBUILD 的 depends 对应，全部写成
-# soname 而非包名，这样 Fedora / RHEL / openSUSE 都能解析（三者包名不同，
-# 但 soname 的 Provides 是一致的）。gcc-libs / glibc / zlib 这类基础库从略。
+# 运行依赖 —— 不要照抄 AUR PKGBUILD 的 depends（它按 Arch 包名过度声明，
+# 换成 soname 后会在新发行版上炸，如 flac 1.5 已升到 libFLAC.so.14）。
+# 本清单来自对发布产物全部 ELF 的 readelf NEEDED 审计（2026-09，v0.9.2），
+# 只保留指向系统库的 soname；包内自带的（libffmpeg/libvips 等）和
+# node_modules 里其他架构的预编译文件（musl/aarch64，靠 AutoReqProv: no 挡住）
+# 都不算数。glibc / libstdc++ / libgcc 这类基础库从略。
 Requires:       libasound.so.2()(64bit)
 Requires:       libatk-1.0.so.0()(64bit)
 Requires:       libatk-bridge-2.0.so.0()(64bit)
 Requires:       libatspi.so.0()(64bit)
-Requires:       libbrotlicommon.so.1()(64bit)
-Requires:       libbrotlidec.so.1()(64bit)
-Requires:       libbrotlienc.so.1()(64bit)
 Requires:       libcairo.so.2()(64bit)
-Requires:       libcares.so.2()(64bit)
-Requires:       libdrm.so.2()(64bit)
-Requires:       libevent-2.1.so.7()(64bit)
-Requires:       libfontconfig.so.1()(64bit)
-Requires:       libfreetype.so.6()(64bit)
+Requires:       libcups.so.2()(64bit)
+Requires:       libdbus-1.so.3()(64bit)
+Requires:       libexpat.so.1()(64bit)
 Requires:       libgbm.so.1()(64bit)
-Requires:       libgdk-3.so.0()(64bit)
-Requires:       libgdk_pixbuf-2.0.so.0()(64bit)
 Requires:       libgio-2.0.so.0()(64bit)
 Requires:       libglib-2.0.so.0()(64bit)
 Requires:       libgobject-2.0.so.0()(64bit)
 Requires:       libgtk-3.so.0()(64bit)
-Requires:       libharfbuzz.so.0()(64bit)
-Requires:       libjpeg.so.62()(64bit)
-Requires:       libminizip.so.1()(64bit)
-Requires:       libnotify.so.4()(64bit)
 Requires:       libnspr4.so()(64bit)
 Requires:       libnss3.so()(64bit)
 Requires:       libnssutil3.so()(64bit)
-Requires:       libopus.so.0()(64bit)
 Requires:       libpango-1.0.so.0()(64bit)
-Requires:       libpulse.so.0()(64bit)
-Requires:       libsecret-1.so.0()(64bit)
 Requires:       libsmime3.so()(64bit)
-Requires:       libuuid.so.1()(64bit)
+Requires:       libudev.so.1()(64bit)
 Requires:       libX11.so.6()(64bit)
 Requires:       libxcb.so.1()(64bit)
 Requires:       libXcomposite.so.1()(64bit)
@@ -69,15 +58,15 @@ Requires:       libXdamage.so.1()(64bit)
 Requires:       libXext.so.6()(64bit)
 Requires:       libXfixes.so.3()(64bit)
 Requires:       libxkbcommon.so.0()(64bit)
-Requires:       libxml2.so.2()(64bit)
 Requires:       libXrandr.so.2()(64bit)
+# Chromium/Electron 在运行时 dlopen 的库（不在 NEEDED 里，缺了只丢功能不崩溃），
+# 与上游 deb 模板/electron-builder 的默认依赖保持一致
+Requires:       libpulse.so.0()(64bit)
+Requires:       libnotify.so.4()(64bit)
+Requires:       libsecret-1.so.0()(64bit)
 Requires:       libXss.so.1()(64bit)
-Requires:       libxslt.so.1()(64bit)
 Requires:       libXtst.so.6()(64bit)
 Requires:       xdg-utils
-# soname 在 RHEL8 系与新发行版之间变过的两个库，用布尔依赖兼容（rpm ≥ 4.13）
-Requires:       (libffi.so.8()(64bit) or libffi.so.6()(64bit))
-Requires:       (libFLAC.so.12()(64bit) or libFLAC.so.8()(64bit))
 
 # 弱依赖（对应 PKGBUILD 的 optdepends；装不上不阻塞安装）
 Suggests:       libappindicator3.so.1()(64bit)
