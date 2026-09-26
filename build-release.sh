@@ -123,7 +123,10 @@ EOF
 
 # 自检：结构与体积
 [[ -x "$STAGE/app/dsh-desktop" ]] || die "app/dsh-desktop 不可执行"
-[[ -f "$STAGE/app/resources/app/node_modules/node/bin/node" ]] \
+# 0.10.0 起上游开启 asar（asarUnpack: node_modules/**），随包 Node 运行时
+# 移到 app.asar.unpacked/ 下；旧路径只在 0.9.x（asar: false）存在，保留以兼容重建
+[[ -f "$STAGE/app/resources/app.asar.unpacked/node_modules/node/bin/node" \
+|| -f "$STAGE/app/resources/app/node_modules/node/bin/node" ]] \
   || die "缺少随包 Node 运行时"
 log "发布树大小: $(du -sh "$STAGE" | cut -f1)"
 

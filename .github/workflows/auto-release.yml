@@ -140,6 +140,8 @@ jobs:
       # 目录后模块解析会失败。而 @deepseek-ai/dsh-session/lib/index.js 里
       # "SESSION_FORMAT_VERSION = N" 是字面量且全文件只出现一次，
       # 所以 tar 流式解出来 grep 即可：不执行代码、不需要 node、只解 74KB。
+      # 0.10.0 起上游开启 asar，node_modules 实际位于 app.asar.unpacked/ 下，
+      # 旧路径（0.9.x，asar: false）作为回退。
       - name: 探测新构建的会话格式版本
         id: fmt
         if: steps.v.outputs.skip != 'true' && steps.exists.outputs.yes != 'true'
@@ -148,12 +150,17 @@ jobs:
         run: |
           set -euo pipefail
           tar="dist-release/dsh-desktop-${VERSION}-linux-x64.tar.zst"
-          member="dsh-desktop-${VERSION}-linux-x64/app/resources/app/node_modules/@deepseek-ai/dsh-session/lib/index.js"
+          member_unpacked="dsh-desktop-${VERSION}-linux-x64/app/resources/app.asar.unpacked/node_modules/@deepseek-ai/dsh-session/lib/index.js"
+          member_legacy="dsh-desktop-${VERSION}-linux-x64/app/resources/app/node_modules/@deepseek-ai/dsh-session/lib/index.js"
 
-          new_fmt=$(tar --zstd -xOf "$tar" "$member" \
+          new_fmt=$(tar --zstd -xOf "$tar" "$member_unpacked" 2>/dev/null \
             | grep -oP 'SESSION_FORMAT_VERSION\s*=\s*\K[0-9]+' | head -1 || true)
           if [ -z "$new_fmt" ]; then
-            echo "::error::无法从产物里解析会话格式版本（$member）"
+            new_fmt=$(tar --zstd -xOf "$tar" "$member_legacy" 2>/dev/null \
+              | grep -oP 'SESSION_FORMAT_VERSION\s*=\s*\K[0-9]+' | head -1 || true)
+          fi
+          if [ -z "$new_fmt" ]; then
+            echo "::error::无法从产物里解析会话格式版本（试了新布局与旧布局两个路径）"
             exit 1
           fi
 
