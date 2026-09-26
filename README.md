@@ -34,7 +34,7 @@ dsh-desktop              dsh-desktop-linux
 | --- | --- |
 | `build-release.sh` | **核心**。完整构建流程：取上游源码 → `npm ci` → electron-builder 打包 → 压缩 → 算校验和。本地和 CI 调用的是**同一个脚本** |
 | `build-rpm.sh` | 把 `tar.zst` 发行产物重打包成 **RPM**（不重复编译）。本地和 CI 调用的也是同一个脚本 |
-| `rpm/dsh-desktop.spec.in` | RPM 打包模板：安装布局与 AUR 配方一致，依赖写成 soname 级，Fedora / RHEL / openSUSE 通用 |
+| `rpm/dsh-desktop.spec.in` | RPM 打包模板：安装布局与 AUR 配方一致，依赖按 NEEDED 审计写成 soname 级，Fedora / RHEL / openSUSE 通用 |
 | `.github/workflows/release.yml` | CI 编排：打 `v*` tag 时构建并创建 Release；手动触发只出 artifact |
 | `.github/workflows/auto-release.yml` | **自动发布**：每天检查上游新版本，构建并发布；**会话格式变了会拒绝发布并开 issue** |
 | `session-format.txt` | 会话格式基线。自动发布拿它和新构建比对，变了就停下来等人确认 |
@@ -86,6 +86,10 @@ sudo zypper install ./dsh-desktop-<版本>-1.x86_64.rpm
 ```
 
 装进系统后直接从应用菜单启动，或运行 `dsh-desktop`。
+
+> KDE Plasma 用户：若安装后应用菜单里没出现图标，运行一次
+> `kbuildsycoca6 --noincremental` 刷新菜单缓存即可（**不要加 sudo**——以 root
+> 重建会把缓存写成 root 属主，用户会话反而刷不动它）。
 
 想自己出 RPM 也可以（Arch 上装 `rpm-tools`，Debian/Ubuntu 上装 `rpm`）：
 
@@ -146,16 +150,24 @@ dsh-desktop-<版本>-linux-x64/
 └── LICENSE                   上游 MIT 许可证
 ```
 
-**运行依赖**（Electron 在 Linux 上所需，AUR 包已声明）：
+**运行依赖**：对发行产物里全部 ELF 做过动态链接（NEEDED）审计，应用本体直接依赖的
+系统库只有这些（Arch 包名；其他发行版的对应包在装 gtk3 / nss 时会自动带入）：
 
 ```
-alsa-lib at-spi2-core brotli c-ares flac fontconfig freetype2 gcc-libs glibc gtk3
-harfbuzz libdrm libevent libffi libjpeg-turbo libnotify libpulse libsecret
-libxcomposite libxdamage libxkbcommon libxrandr libxss libxtst libxml2 libxslt
-minizip nss opus util-linux xdg-utils zlib
+alsa-lib at-spi2-core cairo cups dbus expat gcc-libs glib2 glibc gtk3 libx11
+libxcb libxcomposite libxdamage libxext libxfixes libxkbcommon libxrandr mesa
+nspr nss pango systemd-libs xdg-utils
 ```
+
+另有 5 个库是运行时按需 dlopen 的，缺了只丢对应功能、不影响启动：
+`libnotify`（通知）、`libsecret`（密钥环）、`libpulse`（音频）、`libxss`（空闲检测）、`libxtst`。
 
 托盘图标另需 `libappindicator-gtk3`；Wayland 下屏幕共享另需 `pipewire`（均为可选）。
+
+> 注：AUR 配方的 depends 是保守的**过度声明**——flac / brotli / opus / fontconfig 等
+> 实际是静态链接进包内二进制的，不需要系统库（旧版 RPM 因照搬该清单，在 flac 1.5
+> 的发行版上出现过依赖不可解析）。RPM 包的依赖按上述审计精确声明（soname 级），
+> 因此比 AUR 列表短得多。
 
 ---
 
