@@ -104,7 +104,9 @@ rm -rf dsh-desktop-%{version}-linux-x64
 tar --zstd -xf %{SOURCE0}
 cd dsh-desktop-%{version}-linux-x64
 
-[[ -d app ]] || { echo "error: app/ not found in tarball" >&2; exit 1; }
+# spec 的脚本段由 /bin/sh 执行：Debian/Ubuntu 上是 dash，
+# 不能用 [[ ]] 等 bash 写法，一律用 POSIX 的 [ ]
+[ -d app ] || { echo "error: app/ not found in tarball" >&2; exit 1; }
 
 install -d %{buildroot}/opt/dsh-desktop
 cp -a app/. %{buildroot}/opt/dsh-desktop/
