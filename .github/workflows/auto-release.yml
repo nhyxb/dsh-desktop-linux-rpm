@@ -56,7 +56,7 @@ jobs:
       - name: 安装构建依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends imagemagick zstd
+          sudo apt-get install -y --no-install-recommends imagemagick zstd rpm
 
       - name: 解析目标版本
         id: v
@@ -122,6 +122,16 @@ jobs:
         run: |
           chmod +x build-release.sh
           ./build-release.sh
+
+      # 复用上一步的 tar.zst 重打包成 RPM（不重复编译）；
+      # 与本地 ./build-rpm.sh 是同一个脚本
+      - name: 打包 RPM
+        if: steps.v.outputs.skip != 'true' && steps.exists.outputs.yes != 'true'
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          chmod +x build-rpm.sh
+          ./build-rpm.sh
 
       # 从刚构建出来的产物里读出它捆绑的 DSH 会话格式版本。
       #
@@ -230,6 +240,7 @@ jobs:
             --title "v${VERSION}" \
             --generate-notes \
             dist-release/*.tar.zst \
+            dist-release/*.rpm \
             dist-release/*.sha256 \
             dist-release/session-format.txt
 

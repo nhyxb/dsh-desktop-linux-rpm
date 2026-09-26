@@ -1,0 +1,134 @@
+# dsh-desktop RPM 打包模板
+# 由 build-rpm.sh 渲染：@VERSION@ → 版本号，@RELEASE_NO@ → spec 修订号
+#
+# 这是「二进制重打包」：Source0 里的 tar.zst 已是 build-release.sh 产出的
+# 完整 Electron 应用（含 Electron 与随包 Node 运行时），本 spec 只做安装布局，
+# 布局与 aur/dsh-desktop-bin/PKGBUILD 保持一致。
+
+Name:           dsh-desktop
+Version:        @VERSION@
+Release:        @RELEASE_NO@%{?dist}
+Summary:        Cross-platform desktop shell for DeepSeek Harness
+Summary(zh_CN): DeepSeek Harness 的跨平台桌面客户端
+License:        MIT
+URL:            https://github.com/dataelement/dsh-desktop
+Source0:        dsh-desktop-%{version}-linux-x64.tar.zst
+BuildArch:      x86_64
+
+# 不 strip、不出 debuginfo（同 PKGBUILD 的 options=('!strip' '!debug')）；
+# __os_install_post 置空还会一并关掉 brp-* 检查，避免构建机上的策略脚本
+# 改动捆绑二进制。（注释里的宏名要以 %% 转义，rpmbuild 会展开注释中的宏）
+%global debug_package %{nil}
+%global __os_install_post %{nil}
+
+# 关键：必须关闭自动依赖扫描。捆绑的 Electron/Node 自带大量私有 .so，
+# 自动扫描会把它们写成 Provides，同时把私有库之间的引用写成 Requires，
+# 造成安装时不可解析的依赖。改为下面手写的 soname 级依赖。
+AutoReqProv:    no
+
+# 运行依赖 —— 与 aur/dsh-desktop-bin/PKGBUILD 的 depends 对应，全部写成
+# soname 而非包名，这样 Fedora / RHEL / openSUSE 都能解析（三者包名不同，
+# 但 soname 的 Provides 是一致的）。gcc-libs / glibc / zlib 这类基础库从略。
+Requires:       libasound.so.2()(64bit)
+Requires:       libatk-1.0.so.0()(64bit)
+Requires:       libatk-bridge-2.0.so.0()(64bit)
+Requires:       libatspi.so.0()(64bit)
+Requires:       libbrotlicommon.so.1()(64bit)
+Requires:       libbrotlidec.so.1()(64bit)
+Requires:       libbrotlienc.so.1()(64bit)
+Requires:       libcairo.so.2()(64bit)
+Requires:       libcares.so.2()(64bit)
+Requires:       libdrm.so.2()(64bit)
+Requires:       libevent-2.1.so.7()(64bit)
+Requires:       libfontconfig.so.1()(64bit)
+Requires:       libfreetype.so.6()(64bit)
+Requires:       libgbm.so.1()(64bit)
+Requires:       libgdk-3.so.0()(64bit)
+Requires:       libgdk_pixbuf-2.0.so.0()(64bit)
+Requires:       libgio-2.0.so.0()(64bit)
+Requires:       libglib-2.0.so.0()(64bit)
+Requires:       libgobject-2.0.so.0()(64bit)
+Requires:       libgtk-3.so.0()(64bit)
+Requires:       libharfbuzz.so.0()(64bit)
+Requires:       libjpeg.so.62()(64bit)
+Requires:       libminizip.so.1()(64bit)
+Requires:       libnotify.so.4()(64bit)
+Requires:       libnspr4.so()(64bit)
+Requires:       libnss3.so()(64bit)
+Requires:       libnssutil3.so()(64bit)
+Requires:       libopus.so.0()(64bit)
+Requires:       libpango-1.0.so.0()(64bit)
+Requires:       libpulse.so.0()(64bit)
+Requires:       libsecret-1.so.0()(64bit)
+Requires:       libsmime3.so()(64bit)
+Requires:       libuuid.so.1()(64bit)
+Requires:       libX11.so.6()(64bit)
+Requires:       libxcb.so.1()(64bit)
+Requires:       libXcomposite.so.1()(64bit)
+Requires:       libXdamage.so.1()(64bit)
+Requires:       libXext.so.6()(64bit)
+Requires:       libXfixes.so.3()(64bit)
+Requires:       libxkbcommon.so.0()(64bit)
+Requires:       libxml2.so.2()(64bit)
+Requires:       libXrandr.so.2()(64bit)
+Requires:       libXss.so.1()(64bit)
+Requires:       libxslt.so.1()(64bit)
+Requires:       libXtst.so.6()(64bit)
+Requires:       xdg-utils
+# soname 在 RHEL8 系与新发行版之间变过的两个库，用布尔依赖兼容（rpm ≥ 4.13）
+Requires:       (libffi.so.8()(64bit) or libffi.so.6()(64bit))
+Requires:       (libFLAC.so.12()(64bit) or libFLAC.so.8()(64bit))
+
+# 弱依赖（对应 PKGBUILD 的 optdepends；装不上不阻塞安装）
+Suggests:       libappindicator3.so.1()(64bit)
+Suggests:       pipewire
+
+%description
+A cross-platform desktop shell for DeepSeek Harness: local Agent runtime,
+model providers, mobile phone pairing, editable PPTX generation.
+
+本包为社区构建的 Linux x86_64 二进制重打包，与上游及 DeepSeek 官方无隶属关系。
+软件本体按 MIT 许可证分发（见 %{_defaultlicensedir}/%{name}/LICENSE）。
+
+# 二进制重打包：不做 %%setup。解压放在 %%install 里手动做，
+# 不依赖 rpmbuild 对 tar.zst 的自动识别（构建机只需装 tar 与 zstd）。
+%prep
+
+%build
+
+%install
+rm -rf %{buildroot}
+
+cd %{_topdir}/BUILD
+rm -rf dsh-desktop-%{version}-linux-x64
+tar --zstd -xf %{SOURCE0}
+cd dsh-desktop-%{version}-linux-x64
+
+[[ -d app ]] || { echo "error: app/ not found in tarball" >&2; exit 1; }
+
+install -d %{buildroot}/opt/dsh-desktop
+cp -a app/. %{buildroot}/opt/dsh-desktop/
+chmod 755 %{buildroot}/opt/dsh-desktop/dsh-desktop
+
+install -d %{buildroot}%{_bindir}
+ln -sf /opt/dsh-desktop/dsh-desktop %{buildroot}%{_bindir}/dsh-desktop
+
+install -Dm644 dsh-desktop.desktop \
+  %{buildroot}%{_datadir}/applications/dsh-desktop.desktop
+
+for png in icons/*.png; do
+  size=$(basename "$png" .png)
+  install -Dm644 "$png" \
+    "%{buildroot}%{_datadir}/icons/hicolor/${size}/apps/dsh-desktop.png"
+done
+
+install -Dm644 LICENSE %{buildroot}%{_defaultlicensedir}/%{name}/LICENSE
+
+%files
+%license %{_defaultlicensedir}/%{name}/LICENSE
+/opt/dsh-desktop
+# Chromium 沙箱必须 setuid root，否则无内核 user-namespace 的环境起不来
+%attr(4755,root,root) /opt/dsh-desktop/chrome-sandbox
+%{_bindir}/dsh-desktop
+%{_datadir}/applications/dsh-desktop.desktop
+%{_datadir}/icons/hicolor/*/apps/dsh-desktop.png

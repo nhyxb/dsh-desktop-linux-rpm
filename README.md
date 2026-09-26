@@ -33,6 +33,8 @@ dsh-desktop              dsh-desktop-linux
 | 文件 | 作用 |
 | --- | --- |
 | `build-release.sh` | **核心**。完整构建流程：取上游源码 → `npm ci` → electron-builder 打包 → 压缩 → 算校验和。本地和 CI 调用的是**同一个脚本** |
+| `build-rpm.sh` | 把 `tar.zst` 发行产物重打包成 **RPM**（不重复编译）。本地和 CI 调用的也是同一个脚本 |
+| `rpm/dsh-desktop.spec.in` | RPM 打包模板：安装布局与 AUR 配方一致，依赖写成 soname 级，Fedora / RHEL / openSUSE 通用 |
 | `.github/workflows/release.yml` | CI 编排：打 `v*` tag 时构建并创建 Release；手动触发只出 artifact |
 | `.github/workflows/auto-release.yml` | **自动发布**：每天检查上游新版本，构建并发布；**会话格式变了会拒绝发布并开 issue** |
 | `session-format.txt` | 会话格式基线。自动发布拿它和新构建比对，变了就停下来等人确认 |
@@ -67,6 +69,32 @@ yay -S dsh-desktop-bin
 
 AUR 包会自动下载本仓库 Release 的产物，并在你的机器上打成 pacman 包
 （配方见 [`aur/dsh-desktop-bin/`](aur/dsh-desktop-bin/)）。
+
+### Fedora / RHEL / openSUSE（RPM）
+
+每个 Release 附带 `dsh-desktop-<版本>-1.x86_64.rpm`，由
+[`build-rpm.sh`](build-rpm.sh) 在 CI 里用同一个 `tar.zst` 重打包而来
+（模板见 [`rpm/dsh-desktop.spec.in`](rpm/dsh-desktop.spec.in)）。
+运行依赖已按 soname 声明，用包管理器安装会自动解决：
+
+```bash
+# Fedora / RHEL
+sudo dnf install ./dsh-desktop-<版本>-1.x86_64.rpm
+
+# openSUSE
+sudo zypper install ./dsh-desktop-<版本>-1.x86_64.rpm
+```
+
+装进系统后直接从应用菜单启动，或运行 `dsh-desktop`。
+
+想自己出 RPM 也可以（Arch 上装 `rpm-tools`，Debian/Ubuntu 上装 `rpm`）：
+
+```bash
+git clone https://github.com/xy-arch-git/dsh-desktop-linux.git
+cd dsh-desktop-linux
+./build-release.sh   # 或下载 Release 的 tar.zst 后用 TARBALL= 指定
+./build-rpm.sh
+```
 
 ### 手动安装（任意 Linux 发行版）
 
@@ -103,7 +131,12 @@ makepkg -si
 
 ## Release内容
 
-每个 Release 附带的 `dsh-desktop-<版本>-linux-x64.tar.zst` 解包后结构固定：
+每个 Release 附带两类资产：
+
+- `dsh-desktop-<版本>-linux-x64.tar.zst` —— 通用压缩包（下方结构）
+- `dsh-desktop-<版本>-1.x86_64.rpm` —— 由同一份压缩包重打包的 RPM（含 sha256）
+
+`tar.zst` 解包后结构固定：
 
 ```
 dsh-desktop-<版本>-linux-x64/
