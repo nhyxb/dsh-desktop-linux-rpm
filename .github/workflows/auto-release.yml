@@ -216,15 +216,25 @@ jobs:
           \`sessionFormatVersionRefusal('probe', 999)\` 探测得出。
           EOF
 
-          existing=$(gh issue list --state open --search "in:title 会话格式变更 v${BASE}" --json number --jq 'length')
-          if [ "$existing" = "0" ]; then
-            gh issue create --title "$title" --body-file /tmp/issue-body.md
-            echo "已创建 issue"
+          # fork 默认关闭 Issues 功能，gh 调用会失败；通知渠道挂了不能吞掉
+          # 真正的中止原因，所以 issue 创建全部做成 best-effort。
+          if existing=$(gh issue list --state open --search "in:title 会话格式变更 v${BASE}" --json number --jq 'length' 2>/dev/null); then
+            if [ "$existing" = "0" ]; then
+              gh issue create --title "$title" --body-file /tmp/issue-body.md \
+                && echo "已创建 issue" \
+                || echo "::warning::创建 issue 失败，改为仅在本日志中通知"
+            else
+              echo "已有同类未关闭 issue，跳过创建"
+            fi
           else
-            echo "已有同类未关闭 issue，跳过创建"
+            echo "::warning::Issues 功能不可用（fork 默认关闭），改为仅在本日志中通知"
+            echo "----- 以下为原应创建的 issue 内容 -----"
+            echo "$title"
+            cat /tmp/issue-body.md
+            echo "----- issue 内容结束 -----"
           fi
 
-          echo "::error::会话格式从 v${BASE} 变为 v${NEW}，已拒绝发布。详见该 issue。"
+          echo "::error::会话格式从 v${BASE} 变为 v${NEW}，已拒绝发布。确认接受后：把 session-format.txt 改为 ${NEW} 提交到 main，再重跑本 workflow。"
           exit 1
 
       - name: 打 tag 并创建 Release

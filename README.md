@@ -59,6 +59,16 @@ dsh-desktop              dsh-desktop-linux
 
 ---
 
+## 已知事项
+
+- **0.10.0 起会话格式 v3 → v4，升级后历史会话不可读。** DSH 的会话格式是硬闸门，
+  每个构建只读自己那一个版本：从 0.9.x 升级到 0.10.0+ 后，旧版本保存的会话
+  会报 `the log was written by a newer harness — upgrade the harness to open it`。
+  升级软件包不会动用户数据目录，旧会话文件仍保留在磁盘上——如需查看它们，
+  可保留 0.9.2 的 [Release](https://github.com/nhyxb/dsh-desktop-linux-rpm/releases/tag/v0.9.2) 备用。
+
+---
+
 ## 安装
 
 ### Arch Linux（推荐）
