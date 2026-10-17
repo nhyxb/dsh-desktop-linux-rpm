@@ -71,6 +71,17 @@ mkdir -p "$SRC"
 tar -xzf "$ARCHIVE" -C "$SRC" --strip-components=1
 [[ -f "$SRC/package.json" ]] || die "解包后找不到 package.json"
 
+# 0.11 起上游的 Office 运行时只列出 Windows/macOS。补同源、固定校验和的
+# Linux Python 资源和 WASM 路径；保留上游全部资源校验与 afterPack 验证。
+node "$ROOT/linux/prepare-office-runtime.mjs" "$SRC"
+if [[ -f "$SRC/scripts/office-runtime/prepare.mjs" ]]; then
+  # 只缓存按哈希寻址的下载与模板，不复用上一版本的运行时 payload。
+  mkdir -p "$SRC/.build" "$XDG_CACHE_HOME/office-downloads" "$XDG_CACHE_HOME/office-template-cache"
+  office_cache="$(cd "$XDG_CACHE_HOME" && pwd)"
+  ln -s "$office_cache/office-downloads" "$SRC/.build/office-downloads"
+  ln -s "$office_cache/office-template-cache" "$SRC/.build/office-template-cache"
+fi
+
 # --- 2. npm ci -------------------------------------------------------------
 # npm 12 起引入两道默认门禁，@ 见 AUR-上传指南.md：
 #   --allow-remote=all              lockfile 的 resolved 指向 npmmirror，
@@ -80,10 +91,11 @@ tar -xzf "$ARCHIVE" -C "$SRC" --strip-components=1
 # 这两个开关在 npm 10/11 上只是未使用的配置项，不会报错。
 log "npm ci（约 1GB 下载，首次较慢）"
 ( cd "$SRC" && npm ci --allow-remote=all --dangerously-allow-all-scripts )
+node "$ROOT/linux/prepare-office-runtime.mjs" "$SRC" --dependencies
 
 # --- 3. 打包 ---------------------------------------------------------------
 log "electron-vite build + electron-builder --dir"
-( cd "$SRC" && npm run package:dir )
+( cd "$SRC" && npm run package:dir -- --config "$ROOT/linux/electron-builder.cjs" )
 
 [[ -x "$SRC/dist/linux-unpacked/dsh-desktop" ]] \
   || die "未找到 dist/linux-unpacked/dsh-desktop"
@@ -123,11 +135,17 @@ EOF
 
 # 自检：结构与体积
 [[ -x "$STAGE/app/dsh-desktop" ]] || die "app/dsh-desktop 不可执行"
-# 0.10.0 起上游开启 asar（asarUnpack: node_modules/**），随包 Node 运行时
-# 移到 app.asar.unpacked/ 下；旧路径只在 0.9.x（asar: false）存在，保留以兼容重建
-[[ -f "$STAGE/app/resources/app.asar.unpacked/node_modules/node/bin/node" \
-|| -f "$STAGE/app/resources/app/node_modules/node/bin/node" ]] \
-  || die "缺少随包 Node 运行时"
+# 0.11 起复用 Electron 的 Node 模式；旧版仍验证独立的随包 Node。
+if node -e 'const p = require(process.argv[1]); process.exit(p.dependencies?.node ? 0 : 1)' "$SRC/package.json"; then
+  runtime_node="$STAGE/app/resources/app.asar.unpacked/node_modules/node/bin/node"
+  [[ -x "$runtime_node" ]] || runtime_node="$STAGE/app/resources/app/node_modules/node/bin/node"
+  [[ -x "$runtime_node" ]] || die "缺少随包 Node 运行时"
+  "$runtime_node" --version
+else
+  [[ -f "$STAGE/app/resources/harness-node-entry.mjs" ]] || die "缺少 Harness Node 入口"
+  ELECTRON_RUN_AS_NODE=1 "$STAGE/app/dsh-desktop" -e \
+    'if (!process.versions.electron || !process.versions.node) process.exit(1); console.log(`Electron Node runtime: ${process.versions.node}`)'
+fi
 log "发布树大小: $(du -sh "$STAGE" | cut -f1)"
 
 # --- 5. 压缩 + 校验和 ------------------------------------------------------

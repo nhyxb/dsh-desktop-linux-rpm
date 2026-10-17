@@ -34,6 +34,7 @@ dsh-desktop              dsh-desktop-linux
 | --- | --- |
 | `build-release.sh` | **核心**。完整构建流程：取上游源码 → `npm ci` → electron-builder 打包 → 压缩 → 算校验和。本地和 CI 调用的是**同一个脚本** |
 | `build-rpm.sh` | 把 `tar.zst` 发行产物重打包成 **RPM**（不重复编译）。本地和 CI 调用的也是同一个脚本 |
+| `linux/` | 上游 Office 运行时的 Linux 适配：固定校验和的 Python/wheel 资源、Linux 可执行文件及 WASM 解包路径 |
 | `rpm/dsh-desktop.spec.in` | RPM 打包模板：安装布局与 AUR 配方一致，依赖按 NEEDED 审计写成 soname 级，Fedora / RHEL / openSUSE 通用 |
 | `.github/workflows/release.yml` | CI 编排：打 `v*` tag 时构建并创建 Release；手动触发只出 artifact |
 | `.github/workflows/auto-release.yml` | **自动发布**：每天检查上游新版本，构建并发布；**会话格式变了会拒绝发布并开 issue** |
@@ -154,7 +155,7 @@ makepkg -si
 
 ```
 dsh-desktop-<版本>-linux-x64/
-├── app/                      整个 Electron 应用（含 Electron 43 与随包 Node 24.9 运行时）
+├── app/                      整个 Electron 应用（0.11 起复用 Electron 的 Node 模式，旧版另带 Node 24.9）
 ├── dsh-desktop.desktop       桌面启动项
 ├── icons/                    16~512 的 PNG 图标
 └── LICENSE                   上游 MIT 许可证
@@ -183,9 +184,11 @@ nspr nss pango systemd-libs xdg-utils
 
 ## 兼容性
 
-**glibc 要求：≥ 2.28（2018 年发布）**，已实测确认。
+**glibc 要求随版本变化**：0.9.2 的最高要求为 **2.28**；0.12.0 的 Linux x86_64
+产物包含的 125 个 ELF 中，`sherpa-onnx.node` 最高要求为 **2.32**。
+Office Python/wheel 的最高要求为 2.27，没有进一步提高这一门槛。
 
-实测方法：对压缩包内全部 20 个 ELF 文件读取动态符号版本，最高要求为 `GLIBC_2.28`。
+实测方法：读取发行产物内 x86_64 ELF 的动态符号版本。下表为 0.9.2 的 20 个 ELF 审计结果：
 
 ```
 chrome-sandbox           GLIBC_2.4      libEGL.so / libGLESv2.so    GLIBC_2.16~2.17
@@ -196,7 +199,7 @@ sharp-libvips            GLIBC_2.28     koffi / system.node         GLIBC_2.4~2.
 
 之所以这么低，是因为**没有任何组件是在构建机上编译的**：Electron 与 Node 是官方预编译产物，
 `node-pty` / `koffi` / `sharp` / `ripgrep` 都是「平台-架构」维度的预编译 N-API 包。
-因此本产物可在任何近年更新过的 x86_64 Linux 上运行。
+兼容性由所选版本中预编译组件的最低要求决定，不取决于构建机的 glibc 版本。
 
 > ### 关于可复现性
 >
@@ -278,13 +281,14 @@ cd dsh-desktop-linux
 ./build-release.sh
 ```
 
-构建脚本做的事（约 1GB 下载、10 分钟左右）：
+构建脚本做的事（首次需要下载 Electron、Node 和 Office 运行时，耗时随上游版本变化）：
 
 1. 下载上游 `v<版本>` 的 tag 归档（约 25MB，比全量 `git clone` 小 30 倍）
-2. `npm ci --allow-remote=all --dangerously-allow-all-scripts`
-3. `npm run package:dir`（electron-vite build + electron-builder --dir）
-4. 组装发布树（app / .desktop / icons / LICENSE）
-5. 压成 `tar.zst` 并生成 sha256
+2. 为包含 Office 运行时的版本补充 Linux 适配；旧版不做修改
+3. `npm ci --allow-remote=all --dangerously-allow-all-scripts`
+4. `npm run package:dir`（electron-vite build + electron-builder --dir，保留上游产物验证）
+5. 组装发布树（app / .desktop / icons / LICENSE）
+6. 压成 `tar.zst` 并生成 sha256
 
 版本由环境变量指定：
 
@@ -294,6 +298,30 @@ VERSION=0.9.3 ./build-release.sh
 
 那两个 npm 开关为什么需要、受限环境还要补哪些缓存变量，
 见 [`upstream-fix/`](upstream-fix/)。
+
+### Office 运行时的 Linux 适配
+
+上游 0.11.x / 0.12.0 的 Office 打包输入只列出 Windows/macOS，直接在 Linux
+运行会报 `Office runtime: unsupported native target linux/x64`。
+`build-release.sh` 会对解包后的源码运行 [`linux/prepare-office-runtime.mjs`](linux/prepare-office-runtime.mjs)：
+
+- 从上游引用的同一个 [Harness 固定提交](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/scripts/primary-runtime/lock.json) 补充 Linux x86_64 的 Python/wheel URL 和 SHA-256。
+- 正确记录 Linux 平台，使用 electron-builder 的 Linux 可执行文件名，并将 Linux WASM 引擎定位到 ASAR 外的物理资源。
+- 适配 0.11 起移除独立 Node 包的布局，实际执行 Electron Node 模式检查；旧版继续验证随包 Node。
+- 兼容 Electron ASAR 对不存在路径返回 `null` 的行为，避免将未安装的 Linux 原生引擎误判为损坏，允许选择已安装的 WASM 引擎。
+- 保留上游 electron-builder 配置，并将会话格式常量解包到物理文件，供自动发布兼容性检查读取。
+- 保留上游下载校验、Office/PPT 产物验证与本仓库会话格式闸门。Python 或原生 wheel 版本、适配位置变化时停止构建，要求审核适配。
+
+上游的 npm 锁文件保持不变。Office 下载和模板缓存在 `.build/.cache/`，每次仍重新组装运行时。
+Office 模板渲染需要可用字体；CI 安装 `fonts-dejavu-core` 和 `fonts-noto-cjk`，本地构建也应提供西文及中文字体。
+新版 Office 产物验证会实际执行文件沙箱，构建主机需要可用的 `bubblewrap` 或 Landlock；CI 安装 `bubblewrap`。
+可以先运行离线回归，再做完整构建：
+
+```bash
+node --test tests/*.test.mjs
+VERSION=0.12.0 ./build-release.sh
+VERSION=0.12.0 ./build-rpm.sh
+```
 
 ---
 

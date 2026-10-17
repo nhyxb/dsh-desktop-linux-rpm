@@ -18,12 +18,15 @@ jobs:
 
     steps:
       - name: 检出本仓库
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 安装 Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
+
+      - name: 验证 Linux 构建适配
+        run: node --test tests/*.test.mjs
 
       - name: 解析版本号
         id: v
@@ -39,12 +42,12 @@ jobs:
       - name: 安装构建依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends imagemagick zstd rpm
+          sudo apt-get install -y --no-install-recommends imagemagick zstd rpm bubblewrap fonts-dejavu-core fonts-noto-cjk
 
       # .build/.cache 里是 npm / @electron/get / electron-builder 三层缓存，
       # 命中后能把一次构建从 ~10 分钟压到 ~3 分钟。
       - name: 恢复构建缓存
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .build/.cache
           key: dsh-desktop-build-${{ runner.os }}-${{ steps.v.outputs.version }}
@@ -75,7 +78,7 @@ jobs:
       # 手动触发：只存成 workflow artifact，不碰 Release
       - name: 上传为 workflow artifact
         if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dsh-desktop-linux-x64
           path: dist-release/*
