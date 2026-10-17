@@ -44,6 +44,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends imagemagick zstd rpm bubblewrap fonts-dejavu-core fonts-noto-cjk
 
+      - name: 配置并验证构建沙箱
+        run: |
+          # Ubuntu 24.04 的 AppArmor 限制会阻止 bwrap 创建用户命名空间。
+          # 仅调整此临时 CI 运行器；保留应用的文件沙箱和全部产物验证。
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent -- true
+
       # .build/.cache 里是 npm / @electron/get / electron-builder 三层缓存，
       # 命中后能把一次构建从 ~10 分钟压到 ~3 分钟。
       - name: 恢复构建缓存

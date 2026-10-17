@@ -314,7 +314,7 @@ VERSION=0.9.3 ./build-release.sh
 
 上游的 npm 锁文件保持不变。Office 下载和模板缓存在 `.build/.cache/`，每次仍重新组装运行时。
 Office 模板渲染需要可用字体；CI 安装 `fonts-dejavu-core` 和 `fonts-noto-cjk`，本地构建也应提供西文及中文字体。
-新版 Office 产物验证会实际执行文件沙箱，构建主机需要可用的 `bubblewrap` 或 Landlock；CI 安装 `bubblewrap`。
+新版 Office 产物验证会实际执行文件沙箱，构建主机需要可用的 `bubblewrap` 或 Landlock。CI 安装 `bubblewrap`，在 Ubuntu 24.04 临时运行器中设置 `kernel.apparmor_restrict_unprivileged_userns=0`，并在构建前运行与上游一致的沙箱探测；仅安装软件包不足以保证内核允许启动沙箱。
 可以先运行离线回归，再做完整构建：
 
 ```bash
