@@ -301,16 +301,17 @@ VERSION=0.9.3 ./build-release.sh
 
 ### Office 运行时的 Linux 适配
 
-上游 0.11.x / 0.12.0 的 Office 打包输入只列出 Windows/macOS，直接在 Linux
+上游 0.11.x 起的 Office 打包输入只列出 Windows/macOS，直接在 Linux
 运行会报 `Office runtime: unsupported native target linux/x64`。
 `build-release.sh` 会对解包后的源码运行 [`linux/prepare-office-runtime.mjs`](linux/prepare-office-runtime.mjs)：
 
 - 从上游引用的同一个 [Harness 固定提交](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/scripts/primary-runtime/lock.json) 补充 Linux x86_64 的 Python/wheel URL 和 SHA-256。
 - 正确记录 Linux 平台，使用 electron-builder 的 Linux 可执行文件名，并将 Linux WASM 引擎定位到 ASAR 外的物理资源。
+- 适配 0.12.1 新增的 Harness 产物验证钩子，避免 Linux 启动 `DSH Desktop.exe` 报 `ENOENT`；旧版没有该钩子时保持兼容。
 - 适配 0.11 起移除独立 Node 包的布局，实际执行 Electron Node 模式检查；旧版继续验证随包 Node。
 - 兼容 Electron ASAR 对不存在路径返回 `null` 的行为，避免将未安装的 Linux 原生引擎误判为损坏，允许选择已安装的 WASM 引擎。
 - 保留上游 electron-builder 配置，并将会话格式常量解包到物理文件，供自动发布兼容性检查读取。
-- 保留上游下载校验、Office/PPT 产物验证与本仓库会话格式闸门。Python 或原生 wheel 版本、适配位置变化时停止构建，要求审核适配。
+- 保留上游下载校验、Harness/Office/PPT 产物验证与本仓库会话格式闸门。Python 或原生 wheel 版本、适配位置变化时停止构建，要求审核适配。
 
 上游的 npm 锁文件保持不变。Office 下载和模板缓存在 `.build/.cache/`，每次仍重新组装运行时。
 Office 模板渲染需要可用字体；CI 安装 `fonts-dejavu-core` 和 `fonts-noto-cjk`，本地构建也应提供西文及中文字体。

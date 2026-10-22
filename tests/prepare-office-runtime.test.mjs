@@ -2,11 +2,59 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import { prepareLinuxOffice, prepareLinuxOfficeDependencies } from '../linux/prepare-office-runtime.mjs'
 
 const linux = JSON.parse(await readFile(new URL('../linux/office-runtime-lock.json', import.meta.url), 'utf8'))
+
+// The executable-selection and execFile boundary from upstream v0.12.1.
+// Keep the original Windows fallback so the regression fails without adaptation.
+const harnessHook = `
+const path = require('node:path')
+const { execFile } = require('node:child_process')
+const { promisify } = require('node:util')
+async function verifyPackagedHarness(context) {
+  const product = context.packager.appInfo.productFilename
+  const contents = path.join(context.appOutDir, \`\${product}.app\`, 'Contents')
+  const resources = context.electronPlatformName === 'darwin' ? path.join(contents, 'Resources') : path.join(context.appOutDir, 'resources')
+  const executable = context.electronPlatformName === 'darwin'
+    ? path.join(contents, 'Frameworks', \`\${product} Helper.app\`, 'Contents', 'MacOS', \`\${product} Helper\`)
+    : path.join(context.appOutDir, \`\${product}.exe\`)
+  try {
+    const { stdout, stderr } = await promisify(execFile)(executable, [__filename, '--verify-runtime', path.join(resources, 'app.asar'), resources, executable], {
+      cwd: context.appOutDir, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      timeout: 120_000, maxBuffer: 2 * 1024 * 1024, windowsHide: true
+    })
+    process.stdout.write(stdout)
+    if (stderr) process.stderr.write(stderr)
+  } catch (error) {
+    if (error.stdout) process.stdout.write(error.stdout)
+    if (error.stderr) process.stderr.write(error.stderr)
+    throw error
+  }
+}
+module.exports = { verifyPackagedHarness }
+`
+
+function loadHarnessHook(source, filename, failure) {
+  const calls = []
+  const require = createRequire(import.meta.url)
+  const execFile = (executable, args, options, callback) => {
+    calls.push({ executable, args: Array.from(args), options })
+    callback(failure, { stdout: '', stderr: '' })
+  }
+  const module = { exports: {} }
+  runInNewContext(source, {
+    __filename: filename,
+    module,
+    require: name => name === 'node:child_process' ? { execFile } : require(name),
+    process: { platform: 'linux', env: { DSH_GATE_TEST: 'preserved' }, stdout: { write() {} }, stderr: { write() {} } }
+  })
+  return { calls, verify: module.exports.verifyPackagedHarness }
+}
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-linux-office-'))
@@ -97,6 +145,56 @@ test('reapplying the adaptation preserves the generated files', async t => {
   const before = await Promise.all(files.map(file => readFile(join(root, file), 'utf8')))
   await prepareLinuxOffice(root)
   assert.deepEqual(await Promise.all(files.map(file => readFile(join(root, file), 'utf8'))), before)
+})
+
+test('Harness gate uses the target executable and still invokes runtime verification on every platform', async t => {
+  const { root } = await fixture(t)
+  const file = join(root, 'scripts/verify-packaged-harness.cjs')
+  await writeFile(file, harnessHook)
+  await prepareLinuxOffice(root)
+  const source = await readFile(file, 'utf8')
+  await prepareLinuxOffice(root)
+  assert.equal(await readFile(file, 'utf8'), source)
+
+  const appOutDir = join(root, 'dist', 'unpacked with spaces')
+  for (const platform of ['linux', 'win32', 'darwin']) {
+    const { calls, verify } = loadHarnessHook(source, file)
+    const context = { appOutDir, electronPlatformName: platform, packager: { executableName: 'custom-desktop', appInfo: { productFilename: 'DSH Desktop' } } }
+    await verify(context)
+    assert.equal(calls.length, 1)
+    const contents = join(appOutDir, 'DSH Desktop.app', 'Contents')
+    const executable = platform === 'darwin'
+      ? join(contents, 'Frameworks', 'DSH Desktop Helper.app', 'Contents', 'MacOS', 'DSH Desktop Helper')
+      : join(appOutDir, platform === 'linux' ? 'custom-desktop' : 'DSH Desktop.exe')
+    const resources = platform === 'darwin' ? join(contents, 'Resources') : join(appOutDir, 'resources')
+    assert.equal(calls[0].executable, executable)
+    assert.deepEqual(calls[0].args, [file, '--verify-runtime', join(resources, 'app.asar'), resources, executable])
+    assert.equal(calls[0].options.cwd, appOutDir)
+    assert.equal(calls[0].options.env.ELECTRON_RUN_AS_NODE, '1')
+    assert.equal(calls[0].options.env.DSH_GATE_TEST, 'preserved')
+    assert.equal(calls[0].options.timeout, 120_000)
+  }
+
+  const failure = new Error('Packaged dependency is missing')
+  const { verify } = loadHarnessHook(source, file, failure)
+  await assert.rejects(verify({ appOutDir, electronPlatformName: 'linux', packager: { executableName: 'custom-desktop', appInfo: { productFilename: 'DSH Desktop' } } }), error => error === failure)
+})
+
+test('an unknown Harness hook stops adaptation before any source or lock is written', async t => {
+  const { root } = await fixture(t)
+  const file = join(root, 'scripts/verify-packaged-harness.cjs')
+  const files = ['scripts/office-runtime/lock.json', 'scripts/office-runtime/prepare.mjs', 'scripts/verify-office-runtime.cjs', 'scripts/verify-packaged-ppt-runtime.cjs', 'build/office-engine-resolution.mjs']
+  const before = await Promise.all(files.map(name => readFile(join(root, name), 'utf8')))
+  for (const changed of ['module.exports = {}\n', harnessHook + harnessHook]) {
+    await writeFile(file, changed)
+    await assert.rejects(prepareLinuxOffice(root), /upstream scripts\/verify-packaged-harness\.cjs changed/)
+    assert.deepEqual(await Promise.all(files.map(name => readFile(join(root, name), 'utf8'))), before)
+    assert.equal(await readFile(file, 'utf8'), changed)
+  }
+  await rm(file)
+  await mkdir(file)
+  await assert.rejects(prepareLinuxOffice(root), { code: 'EISDIR' })
+  assert.deepEqual(await Promise.all(files.map(name => readFile(join(root, name), 'utf8'))), before)
 })
 
 test('a new Python version requires new verified Linux assets', async t => {

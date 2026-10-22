@@ -49,17 +49,29 @@ export async function prepareLinuxOffice(sourceRoot) {
     ['scripts/verify-packaged-ppt-runtime.cjs',
       "const executable = process.platform === 'win32'",
       "const executable = process.platform === 'linux'\n    ? path.join(context.appOutDir, context.packager.executableName)\n    : process.platform === 'win32'"],
+    // Added in upstream 0.12.1; older Office releases have no Harness gate.
+    ['scripts/verify-packaged-harness.cjs',
+      ': path.join(context.appOutDir, `${product}.exe`)',
+      ": path.join(context.appOutDir, context.electronPlatformName === 'linux' ? context.packager.executableName : `${product}.exe`)",
+      true],
     ['build/office-engine-resolution.mjs',
       String.raw`/^@deepseek-ai\/libreoffice-kit-(?:darwin|win32|linux)-/u`,
       String.raw`/^@deepseek-ai\/libreoffice-kit-(?:darwin-|win32-|linux-|wasm(?:\/|$))/u`]
   ]
   // Validate all supported upstream seams before writing any changes.
-  const files = await Promise.all(adaptations.map(async ([file, before, after]) => {
+  const files = await Promise.all(adaptations.map(async ([file, before, after, optional = false]) => {
     const path = join(sourceRoot, file)
-    return [path, replaceKnown(await readFile(path, 'utf8'), before, after, file)]
+    let source
+    try {
+      source = await readFile(path, 'utf8')
+    } catch (error) {
+      if (optional && error.code === 'ENOENT') return null
+      throw error
+    }
+    return [path, replaceKnown(source, before, after, file)]
   }))
   lock.targets['linux-x64'] = linuxLock.target
-  for (const [path, contents] of files) await writeFile(path, contents)
+  for (const [path, contents] of files.filter(Boolean)) await writeFile(path, contents)
   await writeFile(lockPath, JSON.stringify(lock, null, 2) + '\n')
   return true
 }
